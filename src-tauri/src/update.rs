@@ -3,9 +3,14 @@
 //! `releases/latest/download/latest.json`, and on request downloads the installer, checks its hash, and
 //! hands off to a helper that waits for us to exit, installs silently and starts Switchboard again.
 //!
+//! The top-level `installer`/`url`/`sha256` are the Windows build (what 0.1.x/0.2.0 read). Other
+//! platforms live under `platforms`: CI adds `darwin-universal` (a `.app.tar.gz`) to the same release a
+//! few minutes after it is published. Until that entry exists a Mac sees no update.
+//!
 //! `SWITCHBOARD_UPDATE_DIR=<folder with latest.json + installer>` switches to a local folder instead
 //! (testing an update without publishing it). Debug builds only check when that is set.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -23,16 +28,39 @@ pub struct Note {
     items: Vec<String>,
 }
 
-#[derive(Deserialize, Clone)]
-struct Latest {
-    version: String,
+/// One downloadable build: an installer (Windows) or an app archive (macOS).
+#[derive(Deserialize, Clone, Default)]
+struct Asset {
     installer: String,
     #[serde(default)]
     url: String,
     #[serde(default)]
     sha256: String,
+}
+
+#[derive(Deserialize, Clone)]
+struct Latest {
+    version: String,
+    /// The Windows build, flattened at the top level for older clients.
+    #[serde(flatten)]
+    windows: Asset,
+    #[serde(default)]
+    platforms: HashMap<String, Asset>,
     #[serde(default)]
     changelog: Vec<Note>,
+}
+
+impl Latest {
+    /// The build for the platform we run on, if this release has one.
+    fn asset(&self) -> Option<&Asset> {
+        if cfg!(windows) {
+            Some(&self.windows)
+        } else if cfg!(target_os = "macos") {
+            self.platforms.get("darwin-universal")
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Serialize, Default)]
@@ -83,6 +111,9 @@ pub async fn update_check(app: AppHandle) -> UpdateInfo {
         return info;
     }
     let Ok(Ok(latest)) = tauri::async_runtime::spawn_blocking(fetch_latest).await else { return info };
+    if latest.asset().is_none() {
+        return info; // released, but not (yet) for this platform
+    }
     let cur = parse(&current);
     info.latest = latest.version.clone();
     info.available = parse(&latest.version) > cur;
@@ -90,11 +121,17 @@ pub async fn update_check(app: AppHandle) -> UpdateInfo {
     info
 }
 
+/// Only ever install a file named like ours.
+fn expected_name(name: &str) -> bool {
+    let suffix = if cfg!(windows) { "-setup.exe" } else { ".app.tar.gz" };
+    name.starts_with("Switchboard_") && name.ends_with(suffix) && !name.contains(['/', '\\'])
+}
+
 /// Where the installer for `latest` is on disk, downloading and verifying it first if needed.
 fn installer_for(latest: &Latest) -> Result<PathBuf, String> {
-    let name = latest.installer.as_str();
-    // Only ever run an installer named like ours.
-    if !name.starts_with("Switchboard_") || !name.ends_with("-setup.exe") || name.contains(['/', '\\']) {
+    let asset = latest.asset().ok_or("this release has no build for this platform")?;
+    let name = asset.installer.as_str();
+    if !expected_name(name) {
         return Err(format!("unexpected installer name: {name}"));
     }
     if let Some(dir) = local_dir() {
@@ -102,17 +139,17 @@ fn installer_for(latest: &Latest) -> Result<PathBuf, String> {
         return if p.exists() { Ok(p) } else { Err(format!("{} not found", p.display())) };
     }
     let prefix = format!("https://github.com/{REPO}/releases/download/");
-    if !latest.url.starts_with(&prefix) {
+    if !asset.url.starts_with(&prefix) {
         return Err("installer url is not a Switchboard release".into());
     }
-    if latest.sha256.len() != 64 {
+    if asset.sha256.len() != 64 {
         return Err("release has no installer checksum".into());
     }
     let dir = std::env::temp_dir().join("switchboard-update");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dest = dir.join(name);
     let part = dir.join(format!("{name}.part"));
-    let resp = agent().get(&latest.url).call().map_err(|e| format!("download failed: {e}"))?;
+    let resp = agent().get(&asset.url).call().map_err(|e| format!("download failed: {e}"))?;
     let mut reader = resp.into_reader().take(MAX_INSTALLER);
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -127,7 +164,7 @@ fn installer_for(latest: &Latest) -> Result<PathBuf, String> {
     }
     drop(file);
     let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    if !got.eq_ignore_ascii_case(&latest.sha256) {
+    if !got.eq_ignore_ascii_case(&asset.sha256) {
         let _ = std::fs::remove_file(&part);
         return Err("downloaded installer failed its checksum".into());
     }
@@ -147,6 +184,7 @@ pub async fn update_apply() -> Result<(), String> {
     launch_helper(&path)
 }
 
+#[cfg(windows)]
 fn launch_helper(installer: &Path) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let pid = std::process::id();
@@ -164,7 +202,6 @@ fn launch_helper(installer: &Path) -> Result<(), String> {
     );
     let mut cmd = std::process::Command::new("powershell.exe");
     cmd.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script]);
-    #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW only; it still outlives us. DETACHED_PROCESS made powershell exit without
@@ -172,4 +209,79 @@ fn launch_helper(installer: &Path) -> Result<(), String> {
         cmd.creation_flags(0x0800_0000);
     }
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// macOS: unpack the new `.app` next to the download now (so a bad archive fails while the app is
+/// still open), then a detached `sh` helper waits for us to exit, swaps the bundle in place (the
+/// old one is kept until the new one is in), clears the quarantine flag and opens it again.
+/// Log: `$TMPDIR/switchboard-update.log`.
+#[cfg(target_os = "macos")]
+fn launch_helper(archive: &Path) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // .../Switchboard.app/Contents/MacOS/switchboard
+    let app = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().is_some_and(|x| x == "app"))
+        .ok_or("Switchboard isn't running from an .app bundle")?
+        .to_path_buf();
+    if app.to_string_lossy().contains("/AppTranslocation/") {
+        return Err("move Switchboard to Applications first (it is running from a read-only copy), then update".into());
+    }
+    let parent = app.parent().ok_or("no folder above the app")?;
+    let probe = parent.join(".switchboard-update-probe");
+    std::fs::write(&probe, b"").map_err(|_| format!("can't write to {}: drag Switchboard somewhere you own and retry", parent.display()))?;
+    let _ = std::fs::remove_file(&probe);
+
+    let stage = std::env::temp_dir().join("switchboard-update").join("app");
+    let _ = std::fs::remove_dir_all(&stage);
+    std::fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
+    let ok = Command::new("/usr/bin/tar")
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(&stage)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?
+        .success();
+    let new_app = stage.join("Switchboard.app");
+    if !ok || !new_app.join("Contents").join("MacOS").is_dir() {
+        return Err("the downloaded update didn't unpack to Switchboard.app".into());
+    }
+
+    let q = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"));
+    let log = std::env::temp_dir().join("switchboard-update.log");
+    let old = parent.join(".Switchboard-old.app");
+    let script = format!(
+        "exec >{log} 2>&1\n\
+         i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 300 ]; do sleep 0.2; i=$((i+1)); done\n\
+         rm -rf {old}\n\
+         if mv {app} {old} && mv {new} {app}; then rm -rf {old}; else echo 'swap failed, restoring'; [ -d {app} ] || mv {old} {app}; fi\n\
+         /usr/bin/xattr -dr com.apple.quarantine {app} 2>/dev/null\n\
+         /usr/bin/open {app}\n",
+        log = q(&log),
+        pid = std::process::id(),
+        old = q(&old),
+        app = q(&app),
+        new = q(&new_app),
+    );
+    Command::new("/bin/sh")
+        .args(["-c", &script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0) // its own group: nothing aimed at ours on exit reaches it
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn launch_helper(_installer: &Path) -> Result<(), String> {
+    Err("updates aren't supported on this platform".into())
 }

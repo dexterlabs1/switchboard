@@ -1,5 +1,6 @@
-//! One ConPTY per pane. Output streams to the webview over a Tauri channel as UTF-8 strings
-//! (split multi-byte sequences are carried over to the next read so nothing is mangled).
+//! One pseudoterminal per pane (ConPTY on Windows, a unix pty on macOS). Output streams to the
+//! webview over a Tauri channel as UTF-8 strings (split multi-byte sequences are carried over to the
+//! next read so nothing is mangled).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -71,6 +72,19 @@ impl Ptys {
 
     pub fn kill_all(&self) {
         let mut panes = self.panes.lock().unwrap();
+        #[cfg(unix)]
+        {
+            // The app is exiting: hang up every pane's whole session, give them a moment, then
+            // make sure nothing survives (a deferred SIGKILL thread would die with us).
+            let groups: Vec<(u32, Vec<i32>)> =
+                panes.values().filter_map(|p| p.pid).map(|pid| (pid, unix::hang_up_session(pid))).collect();
+            if !groups.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                for (pid, members) in groups {
+                    unix::kill_stragglers(pid, &members);
+                }
+            }
+        }
         for (_, p) in panes.iter_mut() {
             let _ = p.child.kill();
         }
@@ -108,13 +122,113 @@ fn take_utf8(carry: &mut Vec<u8>) -> String {
 
 fn claude_exe() -> String {
     // Prefer the native installer's binary; fall back to PATH lookup by name.
+    let name = if cfg!(windows) { "claude.exe" } else { "claude" };
     if let Some(home) = dirs::home_dir() {
-        let p = home.join(".local").join("bin").join("claude.exe");
+        let p = home.join(".local").join("bin").join(name);
         if p.exists() {
             return p.to_string_lossy().into_owned();
         }
     }
     "claude".into()
+}
+
+/// The OpenSSH client the system ships.
+pub fn ssh_exe() -> &'static str {
+    if cfg!(windows) {
+        r"C:\Windows\System32\OpenSSH\ssh.exe"
+    } else {
+        "/usr/bin/ssh"
+    }
+}
+
+/// `--resume <id>` for a Claude pane, if the id is safe to pass and its chat has a transcript.
+fn resume_arg(resume: Option<&str>, cwd: &str) -> Result<Option<String>, String> {
+    let Some(sid) = resume.filter(|s| !s.is_empty()) else { return Ok(None) };
+    // Session ids are UUIDs; reject anything else rather than splice it into a command.
+    if !sid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return Err("bad session id".into());
+    }
+    // A chat that never got a message has no transcript, and `--resume` would just error.
+    Ok(crate::sessions::transcript_path(sid, cwd).map(|_| format!(" --resume {sid}")))
+}
+
+/// What a pane runs on Windows. Claude and SSH panes run inside PowerShell so quitting them leaves
+/// a usable shell in the pane.
+#[cfg(windows)]
+fn pane_command(
+    kind: &str,
+    cwd: &str,
+    resume: Option<&str>,
+    host: Option<String>,
+    remote_cmd: Option<String>,
+) -> Result<CommandBuilder, String> {
+    let mut cmd = CommandBuilder::new("powershell.exe");
+    cmd.arg("-NoLogo");
+    if kind == "claude" {
+        let mut line = format!("& '{}'", claude_exe());
+        if let Some(arg) = resume_arg(resume, cwd)? {
+            line.push_str(&arg);
+        }
+        cmd.args(["-NoExit", "-Command", &line]);
+    } else if kind == "ssh" {
+        let host = host.unwrap_or_default();
+        if !crate::remote::valid_target(&host) {
+            return Err("bad host".into());
+        }
+        // Windows OpenSSH plays best with ConPTY. -t forces a remote TTY for interactive commands.
+        let mut line = format!("& '{}' -t {host}", ssh_exe());
+        if let Some(rc) = remote_cmd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            line.push_str(&format!(" '{}'", rc.replace('\'', "''")));
+        }
+        cmd.args(["-NoExit", "-Command", &line]);
+    }
+    Ok(cmd)
+}
+
+/// Single-quote for a POSIX shell (also fine for zsh, bash and fish).
+#[cfg(unix)]
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// What a pane runs on macOS. A shell pane is the user's login shell. Claude and SSH panes run
+/// inside a login interactive shell (so PATH and the rc files are the same as in Terminal) and
+/// drop back to that shell when they exit.
+#[cfg(unix)]
+fn pane_command(
+    kind: &str,
+    cwd: &str,
+    resume: Option<&str>,
+    host: Option<String>,
+    remote_cmd: Option<String>,
+) -> Result<CommandBuilder, String> {
+    let default = CommandBuilder::new_default_prog();
+    if kind != "claude" && kind != "ssh" {
+        return Ok(default); // $SHELL (else the passwd shell) as a login shell
+    }
+    let shell = default.get_shell();
+    let line = if kind == "claude" {
+        let mut line = sh_quote(&claude_exe());
+        if let Some(arg) = resume_arg(resume, cwd)? {
+            line.push_str(&arg);
+        }
+        line
+    } else {
+        let host = host.unwrap_or_default();
+        if !crate::remote::valid_target(&host) {
+            return Err("bad host".into());
+        }
+        let mut line = format!("{} -t {host}", ssh_exe());
+        if let Some(rc) = remote_cmd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            line.push(' ');
+            line.push_str(&sh_quote(rc));
+        }
+        line
+    };
+    let script = format!("{line}; exec {} -l", sh_quote(&shell));
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.args(["-l", "-i", "-c", &script]);
+    Ok(cmd)
 }
 
 #[tauri::command]
@@ -138,36 +252,9 @@ pub fn pty_spawn(
         .openpty(PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("openpty: {e}"))?;
 
-    // Claude panes run inside PowerShell so quitting Claude leaves a usable shell in the pane.
-    let mut cmd = CommandBuilder::new("powershell.exe");
-    cmd.arg("-NoLogo");
-    if kind == "claude" {
-        let mut line = format!("& '{}'", claude_exe());
-        if let Some(sid) = resume.as_deref().filter(|s| !s.is_empty()) {
-            // Session ids are UUIDs; reject anything else rather than splice it into a command.
-            if !sid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-                return Err("bad session id".into());
-            }
-            // A chat that never got a message has no transcript, and `--resume` would just error.
-            if crate::sessions::transcript_path(sid, &cwd).is_some() {
-                line.push_str(&format!(" --resume {sid}"));
-            }
-        }
-        cmd.args(["-NoExit", "-Command", &line]);
-    } else if kind == "ssh" {
-        let host = host.unwrap_or_default();
-        if !crate::remote::valid_target(&host) {
-            return Err("bad host".into());
-        }
-        // Windows OpenSSH plays best with ConPTY. -t forces a remote TTY for interactive commands.
-        let ssh = r"C:\Windows\System32\OpenSSH\ssh.exe";
-        let mut line = format!("& '{ssh}' -t {host}");
-        if let Some(rc) = remote_cmd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            line.push_str(&format!(" '{}'", rc.replace('\'', "''")));
-        }
-        cmd.args(["-NoExit", "-Command", &line]);
-    }
-    let dir = if std::path::Path::new(&cwd).is_dir() { cwd } else { dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "C:\\".into()) };
+    let mut cmd = pane_command(&kind, &cwd, resume.as_deref(), host, remote_cmd)?;
+    let fallback = if cfg!(windows) { "C:\\" } else { "/" };
+    let dir = if std::path::Path::new(&cwd).is_dir() { cwd } else { dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| fallback.into()) };
     cmd.cwd(dir);
     // Never leak a parent Claude session's markers into a pane (launching Switchboard from inside
     // Claude Code would otherwise make every pane a "child session" with transcripts turned off).
@@ -178,6 +265,16 @@ pub fn pty_spawn(
         }
     }
     cmd.env("COLORTERM", "truecolor");
+    #[cfg(unix)]
+    {
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("TERM_PROGRAM", "Switchboard");
+        // Apps opened from Finder get no locale; without one zsh and Claude Code mangle UTF-8.
+        let has_locale = ["LC_ALL", "LC_CTYPE", "LANG"].iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()));
+        if !has_locale {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
+    }
     cmd.env("SWITCHBOARD_PANE", id.to_string());
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawn: {e}"))?;
@@ -212,17 +309,24 @@ pub fn pty_spawn(
                 }
             }
         }
-        // Reader ends when the child exits and ConPTY closes.
+        // Reader ends when the child exits and the pty closes.
         finish(&st, id, gen);
     });
 
-    // ConPTY keeps the output pipe open until the pseudoconsole closes, so watch the child
-    // separately and close our master when it exits; that unblocks the reader above.
+    // ConPTY keeps the output pipe open until the pseudoconsole closes (and on unix a background
+    // job can hold the pty open), so watch the child separately and close our master when it
+    // exits; that unblocks the reader above.
     let st2: Arc<Ptys> = state.inner().clone();
     if let Some(pid) = pid {
         std::thread::spawn(move || {
             wait_pid(pid);
             finish(&st2, id, gen);
+            // A pane killed by pty_kill is no longer in the map, so `finish` didn't reap it; do it
+            // here or it stays a zombie until the app quits. (No-op if `finish` already did.)
+            #[cfg(unix)]
+            unsafe {
+                libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG);
+            }
         });
     }
 
@@ -259,6 +363,20 @@ fn wait_pid(pid: u32) {
         WaitForSingleObject(h, INFINITE);
         CloseHandle(h);
     }
+}
+
+/// Block until the child exits without reaping it (WNOWAIT), so `finish` still reads its real exit
+/// code. Then give the reader a moment to drain the last output before the master is dropped.
+#[cfg(unix)]
+fn wait_pid(pid: u32) {
+    loop {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOWAIT) };
+        if r == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(150));
 }
 
 /// Re-bind a running pane to a new channel (after a webview reload). Returns the buffered output
@@ -309,30 +427,100 @@ pub fn pty_resize(state: tauri::State<'_, Arc<Ptys>>, id: u32, cols: u16, rows: 
 pub fn pty_kill(state: tauri::State<'_, Arc<Ptys>>, id: u32) -> Result<(), String> {
     let mut panes = state.panes.lock().unwrap();
     if let Some(mut p) = panes.remove(&id) {
-        // Kill the whole tree: powershell -> claude -> its tools.
+        // Kill the whole tree: shell -> claude -> its tools.
         if let Some(pid) = p.pid {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/T", "/F", "/PID", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .creation_flags_no_window()
-                .status();
+            kill_tree(pid);
         }
         let _ = p.child.kill();
     }
     Ok(())
 }
 
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags_no_window()
+        .status();
+}
+
+/// SIGHUP to the pane's whole session now (what closing a terminal window does), SIGKILL to
+/// anything still there a moment later.
+#[cfg(unix)]
+fn kill_tree(pid: u32) {
+    let members = unix::hang_up_session(pid);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        unix::kill_stragglers(pid, &members);
+    });
+}
+
+#[cfg(unix)]
+mod unix {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    /// portable-pty makes each pane's shell a session leader (setsid), so everything started in the
+    /// pane shares its session id, even jobs the shell put in their own process groups. Also take
+    /// descendants that started a session of their own.
+    fn session_members(leader: u32) -> Vec<i32> {
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+        let lead = Pid::from_u32(leader);
+        let mut out: Vec<i32> = Vec::new();
+        for (pid, p) in sys.processes() {
+            let mut ours = p.session_id() == Some(lead);
+            let mut cur = p.parent();
+            for _ in 0..12 {
+                if ours {
+                    break;
+                }
+                let Some(pp) = cur else { break };
+                ours = pp == lead;
+                cur = sys.process(pp).and_then(|x| x.parent());
+            }
+            if ours && *pid != lead {
+                out.push(pid.as_u32() as i32);
+            }
+        }
+        out
+    }
+
+    pub fn hang_up_session(leader: u32) -> Vec<i32> {
+        let members = session_members(leader);
+        unsafe {
+            libc::killpg(leader as i32, libc::SIGHUP);
+            libc::kill(leader as i32, libc::SIGHUP);
+            for m in &members {
+                libc::kill(*m, libc::SIGHUP);
+            }
+        }
+        members
+    }
+
+    /// SIGKILL whatever ignored the hang-up. Only processes still in the pane's session, so a pid
+    /// that was reused in the meantime is left alone.
+    pub fn kill_stragglers(leader: u32, members: &[i32]) {
+        unsafe {
+            for m in members {
+                if libc::getsid(*m) == leader as i32 {
+                    libc::kill(*m, libc::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 trait NoWindow {
     fn creation_flags_no_window(&mut self) -> &mut Self;
 }
+#[cfg(windows)]
 impl NoWindow for std::process::Command {
     fn creation_flags_no_window(&mut self) -> &mut Self {
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            self.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
+        use std::os::windows::process::CommandExt;
+        self.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         self
     }
 }

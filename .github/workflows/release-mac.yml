@@ -1,0 +1,44 @@
+name: release-mac
+
+# `npm run release` (Windows) publishes a release with the installer + latest.json. This builds the
+# macOS app from the same tag, uploads the .dmg + .app.tar.gz, then adds platforms.darwin-universal to
+# that release's latest.json, last, so a Mac never sees an update whose archive isn't there yet.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to add the Mac build to (e.g. v0.3.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build universal app
+        run: bash tools/ci/mac_build.sh >> "$GITHUB_ENV"
+      - name: Upload the .dmg and .app.tar.gz
+        run: gh release upload "$TAG" "$DMG" "$TAR" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Add the Mac build to latest.json
+        run: |
+          mkdir -p rel
+          for i in 1 2 3 4 5 6; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p latest.json -D rel --clobber && break
+            sleep 20
+          done
+          node tools/ci/add-darwin.mjs rel/latest.json "$TAR" "$TAG"
+          gh release upload "$TAG" rel/latest.json --repo "$GITHUB_REPOSITORY" --clobber

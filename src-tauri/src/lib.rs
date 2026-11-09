@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager, RunEvent};
 
+/// `%APPDATA%\switchboard` on Windows, `~/Library/Application Support/switchboard` on macOS.
 /// Dev builds keep their own state so a dev instance can run beside the installed app without
 /// both restoring (and resuming) the same chats. The WebView2 profile is split by the dev
 /// identifier in tauri.dev.conf.json.
@@ -39,20 +40,51 @@ fn save_state(json: String) -> Result<(), String> {
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
+#[cfg(windows)]
+mod clip {
+    use clipboard_win::{formats, is_format_avail};
+
+    pub fn has_image() -> bool {
+        is_format_avail(formats::CF_DIB) || is_format_avail(formats::CF_BITMAP)
+    }
+
+    pub fn text() -> Option<String> {
+        clipboard_win::get_clipboard_string().ok()
+    }
+
+    pub fn set(text: &str) -> Result<(), String> {
+        clipboard_win::set_clipboard_string(text).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod clip {
+    pub fn has_image() -> bool {
+        arboard::Clipboard::new().and_then(|mut c| c.get_image()).is_ok()
+    }
+
+    pub fn text() -> Option<String> {
+        arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok()
+    }
+
+    pub fn set(text: &str) -> Result<(), String> {
+        arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 fn clipboard_has_image() -> bool {
-    use clipboard_win::{formats, is_format_avail};
-    is_format_avail(formats::CF_DIB) || is_format_avail(formats::CF_BITMAP)
+    clip::has_image()
 }
 
 #[tauri::command]
 fn clipboard_text() -> Option<String> {
-    clipboard_win::get_clipboard_string().ok()
+    clip::text()
 }
 
 #[tauri::command]
 fn clipboard_set(text: String) -> Result<(), String> {
-    clipboard_win::set_clipboard_string(&text).map_err(|e| e.to_string())
+    clip::set(&text)
 }
 
 #[tauri::command]
@@ -60,7 +92,48 @@ fn open_url(url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("only http(s) links open".into());
     }
-    std::process::Command::new("explorer").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    let opener = if cfg!(windows) { "explorer" } else { "/usr/bin/open" };
+    std::process::Command::new(opener).arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// macOS menu bar. Built by hand instead of Tauri's default so that Cmd+W reaches the app (close
+/// pane) instead of closing the window, and Quit goes through the same "chats still working?"
+/// check as the close button. The Edit menu is what makes Cmd+C/V/X/A work in text fields.
+#[cfg(target_os = "macos")]
+fn mac_menu(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+    let quit = MenuItemBuilder::with_id("quit", "Quit Switchboard").accelerator("CmdOrCtrl+Q").build(app)?;
+    let app_menu = SubmenuBuilder::new(app, "Switchboard")
+        .about(None)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&quit)
+        .build()?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Window").minimize().maximize().separator().fullscreen().build()?;
+    let menu = MenuBuilder::new(app).items(&[&app_menu, &edit, &window]).build()?;
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        if event.id() == "quit" {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.close();
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -93,6 +166,8 @@ pub fn run() {
         .manage(ptys.clone())
         .manage(cache.clone())
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            mac_menu(app)?;
             sessions::start(app.handle().clone(), ptys.clone(), cache.clone());
             usage::start(app.handle().clone());
             Ok(())

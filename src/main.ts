@@ -15,6 +15,10 @@ import { ACTIONS, comboFromEvent, DEFAULT_MACROS, effectiveBindings, keysMenu, t
 import { openPalette, type PaletteItem } from "./palette";
 import { Shelf, type Parked } from "./shelf";
 import { applyTheme, DEFAULT_THEME, findTheme, theme, THEMES } from "./themes";
+import { isMac, kb, shellName } from "./platform";
+
+// macOS: native traffic lights instead of our window buttons (see style.css).
+document.body.classList.toggle("mac", isMac);
 
 interface Saved {
   v: 1;
@@ -227,7 +231,7 @@ function relayout() {
         "div",
         { class: "empty-state" },
         h("p", { text: "No panes open." }),
-        h("p", { class: "hint", text: "Ctrl+Shift+T new Claude · Ctrl+Shift+O resume a chat · Ctrl+Shift+R remote machine" }),
+        h("p", { class: "hint", text: kb("Ctrl+Shift+T new Claude · Ctrl+Shift+O resume a chat · Ctrl+Shift+R remote machine") }),
       ),
     );
   }
@@ -352,7 +356,7 @@ setInterval(() => {
 }, 30_000);
 
 // ---------- title bar: brand + hotkey menu (TUI style) + window controls ----------
-const attnBtn = h("button", { class: "attn-pill", title: "Jump to the next pane that needs you (Ctrl+Shift+Space)" });
+const attnBtn = h("button", { class: "attn-pill", title: kb("Jump to the next pane that needs you (Ctrl+Shift+Space)") });
 const updateBtn = h("button", { class: "update-pill" });
 updateBtn.hidden = true;
 attnBtn.addEventListener("click", jumpToNext);
@@ -384,21 +388,21 @@ topbar.append(
   h(
     "nav",
     { class: "menu" },
-    hot("^T", "chat", "New Claude pane (Ctrl+Shift+T)", () => addPane({ kind: "claude" })),
-    hot("^N", "shell", "New PowerShell pane (Ctrl+Shift+N)", () => addPane({ kind: "shell" })),
-    hot("^R", "remote", "Shell or Claude on another machine (Ctrl+Shift+R)", openHosts),
-    hot("^O", "sessions", "Running chats + resume past ones (Ctrl+Shift+O)", openSessions),
+    hot(isMac ? "⌘T" : "^T", "chat", kb("New Claude pane (Ctrl+Shift+T)"), () => addPane({ kind: "claude" })),
+    hot(isMac ? "⌘N" : "^N", "shell", kb(`New ${shellName} pane (Ctrl+Shift+N)`), () => addPane({ kind: "shell" })),
+    hot(isMac ? "⇧⌘R" : "^R", "remote", kb("Shell or Claude on another machine (Ctrl+Shift+R)"), openHosts),
+    hot(isMac ? "⇧⌘O" : "^O", "sessions", kb("Running chats + resume past ones (Ctrl+Shift+O)"), openSessions),
     h("span", { class: "sep", text: "│" }),
-    hot("", "cols", "Panes side by side (Ctrl+Alt+1)", () => applyPreset("columns")),
-    hot("", "grid", "Even grid (Ctrl+Alt+3)", () => applyPreset("grid")),
-    hot("", "main", "One big pane + a stack (Ctrl+Alt+4)", () => applyPreset("main")),
+    hot("", "cols", kb("Panes side by side (Ctrl+Alt+1)"), () => applyPreset("columns")),
+    hot("", "grid", kb("Even grid (Ctrl+Alt+3)"), () => applyPreset("grid")),
+    hot("", "main", kb("One big pane + a stack (Ctrl+Alt+4)"), () => applyPreset("main")),
   ),
   h("span", { class: "spacer", "data-tauri-drag-region": "" }),
   updateBtn,
   attnBtn,
   hot("", "theme", "Themes", () => openThemes()),
-  hot("^⇧P", "commands", "Command palette: every action, pane and chat (Ctrl+Shift+P or F1)", () => openCommandPalette()),
-  hot("^,", "keys", "Shortcuts: see and change every key (Ctrl+,)", () => openKeys()),
+  hot(isMac ? "⇧⌘P" : "^⇧P", "commands", kb("Command palette: every action, pane and chat (Ctrl+Shift+P or F1)"), () => openCommandPalette()),
+  hot(isMac ? "⌘," : "^,", "keys", kb("Shortcuts: see and change every key (Ctrl+,)"), () => openKeys()),
   h(
     "span",
     { class: "win-controls" },
@@ -413,6 +417,8 @@ const syncMax = async () => {
   maxBtn.innerHTML = m ? WIN_ICONS.restore : WIN_ICONS.max;
   maxBtn.title = m ? "Restore" : "Maximize";
   document.body.classList.toggle("maximized", m);
+  // Full screen hides the traffic lights, so the title bar no longer leaves room for them.
+  if (isMac) document.body.classList.toggle("fullscreen", await win.isFullscreen().catch(() => false));
 };
 win.onResized(() => syncMax()).catch(() => {});
 syncMax();
@@ -874,11 +880,11 @@ window.addEventListener(
   { capture: true },
 );
 
-// ctrl+shift+wheel: every pane at once (single-pane ctrl+wheel is handled inside the pane).
+// ctrl+shift+wheel: every pane at once (single-pane ctrl+wheel is handled inside the pane). Cmd too on a Mac.
 window.addEventListener(
   "wheel",
   (e) => {
-    if (!e.ctrlKey) return;
+    if (!e.ctrlKey && !(isMac && e.metaKey)) return;
     e.preventDefault();
     if (!e.shiftKey) return;
     const d = e.deltaY || e.deltaX;

@@ -5,6 +5,9 @@
 //   npm run release -- --local   → build + latest.json only (bundle/nsis), nothing committed or published;
 //                                  test it with SWITCHBOARD_UPDATE_DIR=<that folder>
 // Write the user-facing notes under "## Unreleased" in CHANGELOG.md first. Needs `gh` signed in.
+// The macOS build is not made here: publishing the release starts .github/workflows/release-mac.yml,
+// which builds the universal .dmg + .app.tar.gz, uploads them and adds `platforms.darwin-universal`
+// to this release's latest.json (Macs see the update once that is done, ~15 min later).
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, statSync, mkdtempSync } from "node:fs";
@@ -75,13 +78,17 @@ const installer = `Switchboard_${next}_x64-setup.exe`;
 const instPath = join(dir, installer);
 if (!existsSync(instPath)) throw new Error(`installer not found: ${installer}`);
 const sha256 = createHash("sha256").update(readFileSync(instPath)).digest("hex");
+const url = `https://github.com/${REPO}/releases/download/v${next}/${installer}`;
+// Top-level installer/url/sha256 = the Windows build (what 0.1.x/0.2.0 clients read). CI adds
+// platforms["darwin-universal"] after the release is published.
 const latest = {
   version: next,
   installer,
-  url: `https://github.com/${REPO}/releases/download/v${next}/${installer}`,
+  url,
   sha256,
   bytes: statSync(instPath).size,
   builtAt: new Date().toISOString(),
+  platforms: { "windows-x86_64": { installer, url, sha256 } },
   changelog: notes,
 };
 const latestPath = join(dir, "latest.json");
@@ -97,7 +104,13 @@ const notesFile = join(mkdtempSync(join(tmpdir(), "sb-release-")), "notes.md");
 const mine = notes.find((n) => n.version === next)?.items ?? [];
 writeFileSync(
   notesFile,
-  [...mine.map((i) => `- ${i}`), "", `**Download:** \`${installer}\` below (Windows 10/11, per-user, no admin).`, "Already installed? Switchboard offers this update itself."].join("\n"),
+  [
+    ...mine.map((i) => `- ${i}`),
+    "",
+    `**Download:** \`${installer}\` below (Windows 10/11, per-user, no admin).`,
+    `macOS: \`Switchboard_${next}_universal.dmg\` (Apple Silicon and Intel) is added below a few minutes after this release appears.`,
+    "Already installed? Switchboard offers this update itself.",
+  ].join("\n"),
 );
 sh(`gh release create v${next} "${instPath}" "${latestPath}" --repo ${REPO} --title "Switchboard ${next}" --notes-file "${notesFile}"`);
 console.log(`release: published https://github.com/${REPO}/releases/tag/v${next}`);

@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
 import { openUrl } from "./util";
 import { theme, type Theme } from "./themes";
+import { isMac, kb } from "./platform";
 
 export type PaneKind = "claude" | "shell" | "ssh";
 export type Status = "starting" | "busy" | "idle" | "waiting" | "exited" | "none";
@@ -59,7 +60,7 @@ export interface PaneHooks {
 export const DEFAULT_ZOOM = 15;
 /** A chat idle this long gets a quiet "park?" hint in its header. */
 export const IDLE_PARK_MS = 2 * 60 * 60 * 1000;
-const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, monospace';
+const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, monospace';
 
 /** Status glyphs; busy panes get an animated braille spinner from the app's shared ticker. */
 const GLYPH: Record<string, string> = { idle: "●", attn: "◆", waiting: "◆", exited: "×", starting: "○", none: "·" };
@@ -159,7 +160,7 @@ export class Pane {
       cursorBlink: true,
       allowProposedApi: true,
       theme: this.termTheme(theme()),
-      windowsPty: { backend: "conpty", buildNumber: 26200 },
+      ...(isMac ? { macOptionClickForcesSelection: true } : { windowsPty: { backend: "conpty", buildNumber: 26200 } }),
       rescaleOverlappingGlyphs: true,
     });
     this.term.loadAddon(this.fit);
@@ -191,11 +192,12 @@ export class Pane {
     this.el.addEventListener("pointerdown", () => hooks.onFocus(this), true);
     this.term.attachCustomKeyEventHandler((e) => this.onKey(e));
 
-    // ctrl+wheel zooms this pane, ctrl+shift+wheel is handled by the app (all panes).
+    // ctrl+wheel zooms this pane, ctrl+shift+wheel is handled by the app (all panes). On a Mac also
+    // cmd+wheel; a trackpad pinch arrives as ctrl+wheel.
     this.body.addEventListener(
       "wheel",
       (e) => {
-        if (!e.ctrlKey) return;
+        if (!e.ctrlKey && !(isMac && e.metaKey)) return;
         e.preventDefault();
         e.stopPropagation();
         if (e.shiftKey) return; // bubbles to window via app handler
@@ -248,8 +250,8 @@ export class Pane {
     btn(ICON.splitD, "Split down: new Claude (shift-click: shell)", (e) =>
       this.hooks.onSplit(this, "bottom", e.shiftKey ? "shell" : "claude"),
     );
-    btn(ICON.park, "Park on the shelf (Ctrl+Shift+S): keeps running if busy, resumes later if idle", () => this.hooks.onPark(this));
-    btn(ICON.close, "Close pane (Ctrl+Shift+W)", () => this.hooks.onClose(this));
+    btn(ICON.park, kb("Park on the shelf (Ctrl+Shift+S): keeps running if busy, resumes later if idle"), () => this.hooks.onPark(this));
+    btn(ICON.close, kb("Close pane (Ctrl+Shift+W)"), () => this.hooks.onClose(this));
     this.head.append(left, right);
     this.head.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -271,18 +273,18 @@ export class Pane {
     if (this.oscTitle && this.spec.kind !== "claude") {
       const t = this.oscTitle.replace(SPINNER, "").trim();
       // PowerShell titles itself with its own exe path; that says nothing useful.
-      if (!/(^|\\)(windows)?(powershell|pwsh|ssh)(\.exe)?$/i.test(t)) return t;
+      if (!/(^|\\)(windows)?(powershell|pwsh|ssh)(\.exe)?$/i.test(t) && !(isMac && /^-?(zsh|bash|fish|sh)$/.test(t))) return t;
     }
     if (this.spec.kind === "claude") return this.live?.name || "Claude";
     if (this.spec.kind === "ssh") return this.spec.hostLabel || this.spec.host || "remote";
-    return "PowerShell";
+    return isMac ? "Shell" : "PowerShell";
   }
 
   refreshHead() {
     this.titleEl.textContent = this.label();
     this.titleEl.title = this.label() + (this.live ? `\n${this.live.cwd}\n${this.live.sessionId}` : "");
     const k = this.spec.kind;
-    this.kindEl.textContent = k === "shell" ? "ps" : "";
+    this.kindEl.textContent = k === "shell" ? (isMac ? "sh" : "ps") : "";
     this.kindEl.hidden = k !== "shell";
     this.el.classList.toggle("remote", k === "ssh");
     this.refreshStrip();
@@ -348,7 +350,7 @@ export class Pane {
   /** Position number shown in the header (Ctrl+1..9 jumps to it). */
   setIndex(n: number) {
     this.idxEl.textContent = n <= 9 ? String(n) : "";
-    this.idxEl.title = n <= 8 ? `Ctrl+${n}` : n === 9 ? "Ctrl+9" : "";
+    this.idxEl.title = n <= 8 ? kb(`Ctrl+${n}`) : n === 9 ? kb("Ctrl+9") : "";
   }
 
   /** The connection line under a remote pane's header: who, where, and whether it's up. */
@@ -493,7 +495,7 @@ export class Pane {
     this.gotData = false;
     this.live = null;
     this.setStatus("exited");
-    this.term.write(`\r\n\x1b[90m[exited ${code}] Enter restarts · Ctrl+Shift+W closes\x1b[0m\r\n`);
+    this.term.write(`\r\n\x1b[90m[exited ${code}] Enter restarts · ${kb("Ctrl+Shift+W")} closes\x1b[0m\r\n`);
     this.hooks.onExit(this);
   }
 
@@ -535,9 +537,10 @@ export class Pane {
   }
 
   async paste() {
-    // A local Claude pane reads images from the clipboard itself; Alt+V is its Windows paste-image key.
+    // A local Claude pane reads images from the clipboard itself; its paste-image key is Alt+V on
+    // Windows and Ctrl+V on macOS.
     if (this.spec.kind === "claude" && (await invoke<boolean>("clipboard_has_image").catch(() => false))) {
-      this.write("\x1bv");
+      this.write(isMac ? "\x16" : "\x1bv");
       return;
     }
     const text = await invoke<string | null>("clipboard_text").catch(() => null);
@@ -547,12 +550,33 @@ export class Pane {
   private onKey(e: KeyboardEvent): boolean {
     if (e.type !== "keydown") return true;
     const k = e.key.toLowerCase();
-    if (e.ctrlKey && !e.altKey && k === "c" && this.term.hasSelection()) {
+    if (isMac) {
+      // Cmd is the app's (copy, paste, select all); Ctrl and Option keys belong to the terminal,
+      // so Ctrl+C interrupts and Ctrl+V reaches Claude Code as its paste-image key.
+      if (e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (k === "c") {
+          e.preventDefault();
+          if (this.term.hasSelection()) this.copySelection();
+          return false;
+        }
+        if (k === "v") {
+          e.preventDefault();
+          this.paste();
+          return false;
+        }
+        if (k === "a") {
+          e.preventDefault();
+          this.term.selectAll();
+          return false;
+        }
+      }
+      if (e.metaKey) return false; // never typed into the terminal; menu shortcuts still run
+    } else if (e.ctrlKey && !e.altKey && k === "c" && this.term.hasSelection()) {
       e.preventDefault();
       this.copySelection();
       return false;
     }
-    if (e.ctrlKey && !e.altKey && k === "v") {
+    if (!isMac && e.ctrlKey && !e.altKey && k === "v") {
       e.preventDefault();
       this.paste();
       return false;

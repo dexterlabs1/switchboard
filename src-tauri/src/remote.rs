@@ -49,8 +49,18 @@ fn ssh_config_hosts() -> Vec<Host> {
 }
 
 fn tailscale_exe() -> String {
-    let p = r"C:\Program Files\Tailscale\tailscale.exe";
-    if std::path::Path::new(p).exists() { p.into() } else { "tailscale".into() }
+    // macOS: the app bundle's binary doubles as the CLI; apps opened from Finder don't get the
+    // Homebrew folders on PATH, so look there too.
+    let candidates: &[&str] = if cfg!(windows) {
+        &[r"C:\Program Files\Tailscale\tailscale.exe"]
+    } else {
+        &["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale"]
+    };
+    candidates
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "tailscale".into())
 }
 
 /// `tailscale status --json`, bounded to 3 s so a wedged daemon can't stall the picker.
@@ -122,7 +132,7 @@ pub async fn ssh_info(host: String) -> Result<SshInfo, String> {
         return Err("bad host".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = Command::new(r"C:\Windows\System32\OpenSSH\ssh.exe");
+        let mut cmd = Command::new(crate::pty::ssh_exe());
         cmd.args(["-G", &host]).stdout(Stdio::piped()).stderr(Stdio::null());
         #[cfg(windows)]
         {

@@ -1,0 +1,22 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Switchboard Dev",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 640,
+        "minHeight": 400,
+        "dragDropEnabled": true,
+        "zoomHotkeysEnabled": false,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "shadow": true,
+        "backgroundColor": "#121110",
+        "visible": false
+      }
+    ]
+  }
+}

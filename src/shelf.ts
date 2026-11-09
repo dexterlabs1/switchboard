@@ -4,6 +4,7 @@ import type { PaneSpec } from "./pane";
 import { ago } from "./pane";
 import { closeOverlay, mount } from "./ui";
 import { h } from "./util";
+import { isMac } from "./platform";
 
 export interface Parked {
   id: number; // pane id
@@ -47,7 +48,7 @@ export class Shelf {
     this.el.classList.toggle("empty", items.length === 0);
     this.el.append(h("span", { class: "shelf-label", text: "shelf" }));
     if (!items.length) {
-      this.el.append(h("span", { class: "shelf-hint", text: "park a chat here: drag its header down, ↓ in the header, or ctrl+shift+s" }));
+      this.el.append(h("span", { class: "shelf-hint", text: `park a chat here: drag its header down, ↓ in the header, or ${isMac ? "⇧⌘S" : "ctrl+shift+s"}` }));
       return;
     }
     // Group chips by project so a busy shelf stays readable; each project gets a stable colour.

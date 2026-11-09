@@ -16,7 +16,7 @@
   --busy: #e2b867;
   --ok: #8fbf6a;
   --bad: #e5675e;
-  --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, monospace;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
 }
@@ -46,6 +46,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .win svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
 .win:hover { background: var(--head-focus); color: var(--bright); }
 .win.close:hover { background: #c42b1c; color: #fff; }
+/* macOS: the native traffic lights sit over the left end of the bar (overlay title bar). */
+.mac .win-controls { display: none; }
+.mac #topbar { padding-left: 80px; padding-right: 4px; }
+.mac.fullscreen #topbar { padding-left: 12px; }
 
 /* ---------- status line ---------- */
 #statusbar { display: flex; align-items: center; gap: 18px; height: 24px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); color: var(--dim); flex: none; white-space: nowrap; overflow: hidden; font-size: 12px; }

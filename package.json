@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",
-    "app:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "app:dev": "node tools/app-dev.mjs",
     "release": "node tools/release.mjs"
   },
   "dependencies": {

@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ago, modelLabel, type LiveSession } from "./pane";
 import { h } from "./util";
+import { isMac, kb, shellName } from "./platform";
 
 let current: HTMLElement | null = null;
 
@@ -312,7 +313,7 @@ export function hostPicker(
 export function helpOverlay() {
   const keys: [string, string][] = [
     ["Ctrl+Shift+T", "New Claude pane"],
-    ["Ctrl+Shift+N", "New PowerShell pane"],
+    ["Ctrl+Shift+N", `New ${shellName} pane`],
     ["Ctrl+Shift+R", "Remote machine (SSH shell or Claude)"],
     ["Ctrl+Shift+O", "Sessions: running + resume past chats"],
     ["Ctrl+Shift+Space", "Jump to the next pane that needs you"],
@@ -325,14 +326,21 @@ export function helpOverlay() {
     ["Ctrl+= / Ctrl+- / Ctrl+0", "Text size of this pane (bigger / smaller / reset)"],
     ["Ctrl+Alt+1…4", "Layout: columns / rows / grid / main + stack"],
     ["F2", "Rename / color the pane"],
-    ["Ctrl+C", "Copy when text is selected, otherwise interrupt"],
-    ["Ctrl+V / right-click", "Paste (screenshots go straight to Claude)"],
+    ...((isMac
+      ? [
+          ["⌘C", "Copy the selection (⌃C interrupts)"],
+          ["⌘V / right-click", "Paste (screenshots go straight to Claude)"],
+        ]
+      : [
+          ["Ctrl+C", "Copy when text is selected, otherwise interrupt"],
+          ["Ctrl+V / right-click", "Paste (screenshots go straight to Claude)"],
+        ]) as [string, string][]),
     ["Shift+Enter", "New line in Claude's prompt"],
     ["Drag a pane header", "Drop on an edge to dock there, on the middle to swap"],
     ["Drop files on a pane", "Types their paths"],
   ];
   const grid = h("div", { class: "keys" });
-  for (const [k, d] of keys) grid.append(h("kbd", { text: k }), h("span", { text: d }));
+  for (const [k, d] of keys) grid.append(h("kbd", { text: kb(k) }), h("span", { text: d }));
   mount(h("div", { class: "modal help" }, h("h3", { text: "Shortcuts" }), grid), "center");
   (current?.querySelector(".modal") as HTMLElement | null)?.setAttribute("tabindex", "-1");
   (current?.querySelector(".modal") as HTMLElement | null)?.focus();

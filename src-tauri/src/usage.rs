@@ -1,7 +1,8 @@
 //! Plan usage (the numbers behind Claude Code's /usage) for the status bar.
-//! Reads the OAuth token Claude Code already keeps in ~/.claude/.credentials.json and asks
-//! api.anthropic.com for this account's limits. Unofficial endpoint: shape changes fail quietly.
-//! The token is only ever sent to api.anthropic.com and never leaves this module.
+//! Reads the OAuth token Claude Code already keeps (~/.claude/.credentials.json; on macOS the login
+//! Keychain first) and asks api.anthropic.com for this account's limits. Unofficial endpoint: shape
+//! changes fail quietly. The token is only ever sent to api.anthropic.com, never logged, and never
+//! leaves this module.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -51,10 +52,44 @@ fn label_for(kind: &str, scope: Option<&Value>) -> String {
     }
 }
 
+/// Claude Code on macOS stores its credentials JSON as a generic password in the login Keychain.
+/// It writes the item with the `security` tool, so reading it the same way doesn't prompt.
+/// Bounded to 5 s in case the Keychain is locked and asks for a password.
+#[cfg(target_os = "macos")]
+fn keychain_credentials() -> Option<String> {
+    use std::process::{Command, Stdio};
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = Command::new("/usr/bin/security")
+            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+        let _ = tx.send(out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()));
+    });
+    rx.recv_timeout(Duration::from_secs(5)).ok().flatten().filter(|s| !s.is_empty())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_credentials() -> Option<String> {
+    None
+}
+
+fn credentials() -> Option<Value> {
+    let from_file = || {
+        let path = dirs::home_dir().unwrap_or_default().join(".claude").join(".credentials.json");
+        std::fs::read_to_string(path).ok()
+    };
+    keychain_credentials()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(|v| v["claudeAiOauth"]["accessToken"].is_string())
+        .or_else(|| from_file().and_then(|s| serde_json::from_str(&s).ok()))
+}
+
 pub fn fetch() -> Usage {
     let mut u = Usage { fetched_at: now_ms(), ..Default::default() };
-    let path = dirs::home_dir().unwrap_or_default().join(".claude").join(".credentials.json");
-    let creds: Value = match std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+    let creds: Value = match credentials() {
         Some(v) => v,
         None => {
             u.error = "not signed in".into();
@@ -158,7 +193,9 @@ fn fetch_cached(force: bool) -> Usage {
     let fresh = fetch();
     let mut last = LAST.lock().unwrap();
     if fresh.ok {
-        let _ = std::fs::write(cache_path(), serde_json::to_string(&fresh).unwrap_or_default());
+        let p = cache_path();
+        let _ = std::fs::create_dir_all(p.parent().unwrap_or(&p));
+        let _ = std::fs::write(p,serde_json::to_string(&fresh).unwrap_or_default());
         *last = Some(fresh.clone());
         return fresh;
     }

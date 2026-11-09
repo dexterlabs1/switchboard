@@ -2,6 +2,7 @@
 // command into the focused chat (or every chat). Defaults are the replies and commands people type most.
 import { closeOverlay, mount } from "./ui";
 import { h } from "./util";
+import { isMac, modLabel, platformCombo, shellName } from "./platform";
 
 export interface Macro {
   id: string;
@@ -24,8 +25,9 @@ export interface ActionDef {
   keys: string[];
 }
 
-/** App actions and their default keys. Handlers live in main.ts. */
-export const ACTIONS: ActionDef[] = [
+/** App actions and their default keys (written Windows-style; macOS gets the Cmd versions from
+ *  platform.ts). Handlers live in main.ts. */
+const BASE_ACTIONS: ActionDef[] = [
   // Borrowed conventions: browser tabs (Ctrl+1..9, Ctrl+Tab), VS Code (Ctrl+Shift+P, F1, Ctrl+,),
   // Windows Terminal (Ctrl+Shift+T/W/F, Alt+arrows, Alt+Shift+D/+/-). Unique to Switchboard:
   // Ctrl+Shift+Space (next pane that needs you), Ctrl+Shift+O sessions, Ctrl+Alt macros.
@@ -41,7 +43,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "app.checkUpdate", label: "Check for updates", group: "Open", keys: [] },
 
   { id: "pane.newClaude", label: "New Claude chat", group: "Panes", keys: ["Ctrl+Shift+T"] },
-  { id: "pane.newShell", label: "New PowerShell", group: "Panes", keys: ["Ctrl+Shift+N"] },
+  { id: "pane.newShell", label: `New ${shellName}`, group: "Panes", keys: ["Ctrl+Shift+N"] },
   { id: "pane.duplicate", label: "Duplicate pane (same kind + folder)", group: "Panes", keys: ["Alt+Shift+D"] },
   { id: "pane.splitRight", label: "Split right (new chat)", group: "Panes", keys: ["Alt+Shift+="] },
   { id: "pane.splitDown", label: "Split down (new chat)", group: "Panes", keys: ["Alt+Shift+-"] },
@@ -78,6 +80,8 @@ export const ACTIONS: ActionDef[] = [
   { id: "text.resetAll", label: "Text size reset (all panes)", group: "Text", keys: [] },
 ];
 
+export const ACTIONS: ActionDef[] = BASE_ACTIONS.map((a) => ({ ...a, keys: a.keys.map(platformCombo) }));
+
 let n = 0;
 const m = (label: string, text: string, keys: string, target: Macro["target"] = "focused", enter = true): Macro => ({
   id: `m${++n}`,
@@ -85,7 +89,7 @@ const m = (label: string, text: string, keys: string, target: Macro["target"] = 
   text,
   enter,
   target,
-  keys,
+  keys: platformCombo(keys), // Ctrl+Alt+letter; Cmd+Alt+letter on a Mac
 });
 
 /** Seeded from history.jsonl: his most-sent short replies and slash commands. */
@@ -142,8 +146,11 @@ export function keyName(e: KeyboardEvent): string | null {
 export function comboFromEvent(e: KeyboardEvent): string | null {
   const k = keyName(e);
   if (!k) return null;
-  return [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Win", k].filter(Boolean).join("+");
+  return [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && META, k].filter(Boolean).join("+");
 }
+
+/** The Windows key, or Command on a Mac. */
+const META = isMac ? "Cmd" : "Win";
 
 /** Canonical form so "shift+ctrl+t" and "Ctrl+Shift+T" match. */
 export function normalize(combo: string): string {
@@ -152,7 +159,8 @@ export function normalize(combo: string): string {
   const key = parts.pop() ?? "";
   const mods = new Set(parts.map((p) => p.toLowerCase()));
   const K = key.length === 1 ? key.toUpperCase() : key;
-  return [mods.has("ctrl") && "Ctrl", mods.has("alt") && "Alt", mods.has("shift") && "Shift", mods.has("win") && "Win", K]
+  const meta = ["win", "cmd", "meta", "super"].some((x) => mods.has(x));
+  return [mods.has("ctrl") && "Ctrl", (mods.has("alt") || mods.has("option")) && "Alt", mods.has("shift") && "Shift", meta && META, K]
     .filter(Boolean)
     .join("+");
 }
@@ -166,7 +174,8 @@ export function keycaps(combo: string): HTMLElement {
   const pretty: Record<string, string> = { Left: "←", Right: "→", Up: "↑", Down: "↓", Enter: "⏎", Backspace: "⌫", Space: "space", Escape: "esc", Tab: "tab" };
   combo.split("+").forEach((p, i) => {
     if (i) wrap.append(h("span", { class: "plus", text: "+" }));
-    wrap.append(h("span", { class: `cap${["Ctrl", "Alt", "Shift", "Win"].includes(p) ? " mod" : ""}`, text: (pretty[p] ?? p).toLowerCase() }));
+    const mod = ["Ctrl", "Alt", "Shift", "Win", "Cmd"].includes(p);
+    wrap.append(h("span", { class: `cap${mod ? " mod" : ""}`, text: (mod ? modLabel(p) : pretty[p] ?? p).toLowerCase() }));
   });
   return wrap;
 }
@@ -195,8 +204,8 @@ export function keysMenu(host: KeyHost) {
   const body = h("div", { class: "keys-body" });
   const mapEl = h("div", { class: "kbmap" });
   const modTabs = h("div", { class: "modtabs" });
-  const MODS = ["Ctrl+Alt", "Ctrl+Shift", "Alt+Shift", "Ctrl", "Alt"];
-  let mod = "Ctrl+Alt";
+  const MODS = ["Ctrl+Alt", "Ctrl+Shift", "Alt+Shift", "Ctrl", "Alt"].map(platformCombo);
+  let mod = MODS[0];
 
   const owners = () => {
     const map = new Map<string, string[]>();
@@ -207,7 +216,7 @@ export function keysMenu(host: KeyHost) {
   const drawMap = () => {
     modTabs.replaceChildren();
     for (const md of MODS) {
-      const t = h("button", { class: `modtab${md === mod ? " on" : ""}`, text: md.toLowerCase() });
+      const t = h("button", { class: `modtab${md === mod ? " on" : ""}`, text: isMac ? md.split("+").map(modLabel).join("") : md.toLowerCase() });
       t.addEventListener("click", () => {
         mod = md;
         drawMap();
@@ -334,7 +343,12 @@ export function keysMenu(host: KeyHost) {
     h("div", { class: "row spread" }, h("h3", { text: "shortcuts" }), resetAll),
     h(
       "p",
-      { class: "hint", text: "Click any key to rebind it. Macros type text into the focused chat (or every chat) and press Enter. Fixed: ctrl+c copies when text is selected, ctrl+v pastes (screenshots go to Claude), shift+enter is a new line, ctrl+scroll sizes text." },
+      {
+        class: "hint",
+        text: isMac
+          ? "Click any key to rebind it. Macros type text into the focused chat (or every chat) and press Enter. Fixed: ⌘C copies, ⌘V pastes (screenshots go to Claude), ⌃ keys go to the terminal, shift+enter is a new line, ⌘ scroll or pinch sizes text."
+          : "Click any key to rebind it. Macros type text into the focused chat (or every chat) and press Enter. Fixed: ctrl+c copies when text is selected, ctrl+v pastes (screenshots go to Claude), shift+enter is a new line, ctrl+scroll sizes text.",
+      },
     ),
     h("div", { class: "kbwrap" }, modTabs, mapEl, h("div", { class: "kblegend" }, h("span", { class: "kbkey bound", text: "a" }), " bound ", h("span", { class: "kbkey", text: "a" }), " free ", h("span", { class: "kbkey bound clash", text: "a" }), " clash · hover a key to see what it does")),
     body,
