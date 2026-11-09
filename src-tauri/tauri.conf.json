@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Switchboard",
+  "version": "0.1.4",
+  "identifier": "com.dexterlabs.switchboard",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:4830",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Switchboard",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 640,
+        "minHeight": 400,
+        "dragDropEnabled": true,
+        "zoomHotkeysEnabled": false,
+        "decorations": false,
+        "shadow": true,
+        "backgroundColor": "#121110",
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "default"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "identifier": "com.dexterlabs.switchboard.dev",
+  "productName": "Switchboard Dev",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Switchboard Dev",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 640,
+        "minHeight": 400,
+        "dragDropEnabled": true,
+        "zoomHotkeysEnabled": false,
+        "decorations": false,
+        "shadow": true,
+        "backgroundColor": "#121110",
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "default",
+        "demo"
+      ]
+    }
+  }
+}

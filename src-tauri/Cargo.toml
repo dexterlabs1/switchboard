@@ -1,0 +1,32 @@
+[package]
+name = "switchboard"
+version = "0.1.4"
+edition = "2021"
+description = "Claude-aware tiling terminal"
+
+[lib]
+name = "switchboard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+portable-pty = "0.9"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+clipboard-win = "5"
+dirs = "6"
+regex = "1"
+sha2 = "0.10"
+ureq = { version = "2", features = ["json"] }
+tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
