@@ -88,6 +88,13 @@
   with `waitpid(WNOHANG)` after `finish()`, for panes `pty_kill` already removed (else zombies until quit).
   Don't poll `kill(pid, 0)`: a zombie still answers it.
 
+## GOTCHA (macOS): xterm's WebGL renderer draws nothing in WKWebView on the CI Mac
+- **Symptom:** on the GitHub macOS runner every pane was blank (no prompt, no cursor) while `--diag` showed
+  the buffer full of the right text and the WebGL addon loaded without error.
+- **Cause:** not pinned down. WebKit masks the GPU name ("Apple GPU"), so a VM can't be told from a real Mac.
+- **Fix:** macOS uses xterm's DOM renderer by default (`renderOpts` in pane.ts); it renders correctly there.
+  `--renderer webgl` turns WebGL back on for one launch to test it on real hardware. Windows keeps WebGL.
+
 ## GOTCHA: macOS targets can't be cargo-checked on Windows
 - `cargo check --target aarch64-apple-darwin` stops at `objc2-exception-helper`'s build script (it compiles
   an Objective-C file and needs `cc`). Check Mac code on the CI macOS job (`build.yml`), not locally.

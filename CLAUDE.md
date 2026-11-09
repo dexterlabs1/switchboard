@@ -68,6 +68,8 @@ npm run release [-- minor|major]         # (Windows) bump, build, tag, push, pub
                                          # platforms.darwin-universal to latest.json (~15 min). Check that run went green.
 npm run release -- --local               # same build + latest.json, nothing published (test with SWITCHBOARD_UPDATE_DIR)
 switchboard.exe --new-claude [--continue] [--cwd DIR] | --shell [--cwd DIR]   # forwards to the running window
+switchboard --renderer dom|webgl --diag  # first launch only: terminal renderer (macOS defaults to dom), and a
+                                         # 2 s report of pane sizes/renderer/screen text in <config>/switchboard/diag.txt
 
 # macOS (npm run app:dev works the same; tools/app-dev.mjs adds tauri.dev.macos.conf.json for the title bar)
 npm run tauri build -- --target universal-apple-darwin   # needs both rustup targets; bundle/macos + bundle/dmg

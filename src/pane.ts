@@ -58,8 +58,9 @@ export interface PaneHooks {
 }
 
 export const DEFAULT_ZOOM = 15;
-/** GPU (WebGL) text rendering; `--renderer dom` turns it off for a launch. */
-export const renderOpts = { webgl: true };
+/** GPU (WebGL) text rendering. Off on macOS: in WKWebView on the CI Mac the WebGL canvas stayed blank
+ *  while the buffer held the text (docs/gotchas.md). `--renderer dom|webgl` overrides it for a launch. */
+export const renderOpts = { webgl: !isMac };
 /** A chat idle this long gets a quiet "park?" hint in its header. */
 export const IDLE_PARK_MS = 2 * 60 * 60 * 1000;
 const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, monospace';

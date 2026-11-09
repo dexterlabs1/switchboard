@@ -33,8 +33,9 @@ panes() { pgrep -fl "claude|^-(ba|z)sh|sh -l" | grep -v pgrep | tee -a "$LOG" | 
 
 STATE_DIR="$HOME/Library/Application Support/switchboard"
 
-say "renderer comparison: default (WebGL) launch"
-"$BIN" --shell --cwd "$DEMO" --diag > "$OUT/app-stdout-webgl.txt" 2>&1 &
+# WebGL is off by default on macOS (blank on this VM, see docs/gotchas.md); keep a record of it each run.
+say "renderer comparison: --renderer webgl launch"
+"$BIN" --shell --cwd "$DEMO" --diag --renderer webgl > "$OUT/app-stdout-webgl.txt" 2>&1 &
 PID=$!
 sleep 10
 keys 'keystroke "echo webgl renderer"'
@@ -42,8 +43,8 @@ keys 'key code 36'
 shot 0-webgl-shell 2
 kill "$PID"; sleep 2; rm -rf "$STATE_DIR"
 
-say "launch with --shell (DOM renderer for the rest)"
-"$BIN" --shell --cwd "$DEMO" --diag --renderer dom > "$OUT/app-stdout.txt" 2>&1 &
+say "launch with --shell (default renderer: DOM on macOS)"
+"$BIN" --shell --cwd "$DEMO" --diag > "$OUT/app-stdout.txt" 2>&1 &
 PID=$!
 sleep 10
 if ! kill -0 "$PID" 2>/dev/null; then say "APP EXITED EARLY"; cat "$OUT/app-stdout.txt"; exit 1; fi

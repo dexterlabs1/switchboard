@@ -1243,7 +1243,7 @@ listen<string[]>("cli", (e) => handleArgs(e.payload));
 async function boot() {
   const args0 = await invoke<string[]>("launch_args").catch((): string[] => []);
   const r = args0.indexOf("--renderer");
-  if (r >= 0 && args0[r + 1] === "dom") renderOpts.webgl = false;
+  if (r >= 0 && ["dom", "webgl"].includes(args0[r + 1])) renderOpts.webgl = args0[r + 1] === "webgl";
   let saved: Saved | null = null;
   try {
     const raw = await invoke<string | null>("load_state");
