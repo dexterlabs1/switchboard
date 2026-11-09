@@ -1,10 +1,10 @@
 <p align="center"><img src="docs/wordmark.png" width="300" alt="switchboard"></p>
 
 <p align="center"><b>Your chats, organized.</b><br>
-A tiling terminal for Windows that runs all your Claude Code chats side by side and lights up the one that's waiting on you.</p>
+A tiling terminal for Windows and macOS that runs all your Claude Code chats side by side and lights up the one that's waiting on you.</p>
 
 <p align="center">
-  <a href="https://github.com/dexterlabs1/switchboard/releases/latest"><b>Download for Windows</b></a> &nbsp;·&nbsp;
+  <a href="https://github.com/dexterlabs1/switchboard/releases/latest"><b>Download for Windows or Mac</b></a> &nbsp;·&nbsp;
   <a href="https://dexterbrewer.com/tools/switchboard"><b>Watch the demo</b></a> &nbsp;·&nbsp;
   MIT licensed, free
 </p>
@@ -47,19 +47,34 @@ Switchboard puts them all on one screen and tells you.
 </p>
 
 ## Install
+You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and signed in. Switchboard looks for it in
+`~/.local/bin/claude` (`claude.exe` on Windows), then on your `PATH`.
+
+**Windows** (10 and 11, x64)
 1. Download `Switchboard_x.y.z_x64-setup.exe` from the [latest release](https://github.com/dexterlabs1/switchboard/releases/latest)
    and run it. It installs for your user only; no admin needed.
 2. The installer isn't code-signed yet, so Windows SmartScreen may warn you: click **More info → Run anyway**.
-3. You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and signed in. Switchboard looks for it in
-   `~/.local/bin/claude.exe`, then on your `PATH`.
 
-Windows 10 and 11, x64. A new chat opens in your home folder; use *Start new chats in this pane's folder*
-from the palette to change that, or start one anywhere from a script:
+**macOS** (11 Big Sur or later, Apple Silicon and Intel)
+1. Download `Switchboard_x.y.z_universal.dmg` from the [latest release](https://github.com/dexterlabs1/switchboard/releases/latest),
+   open it and drag Switchboard into Applications.
+2. The app isn't signed with an Apple developer ID yet, so the first launch needs one extra step:
+   **right-click Switchboard in Applications → Open → Open**. On macOS 15 and later, if there's no Open button,
+   go to **System Settings → Privacy & Security** and click **Open Anyway**. After that it opens normally.
+3. Shortcuts use **⌘** where Windows uses Ctrl (⌘T new chat, ⌘W close, ⌘1…9, ⇧⌘P palette, ⌘, shortcuts);
+   **⌃** keys go to the terminal as usual, so ⌃C interrupts and ⌃V pastes a screenshot into Claude.
+   Panes run your login shell (`$SHELL`, usually zsh).
+
+A new chat opens in your home folder; use *Start new chats in this pane's folder* from the palette to change
+that, or start one anywhere from a script:
 
 ```
 switchboard.exe --new-claude --cwd C:\path\to\project     # opens a chat in the running window
 switchboard.exe --new-claude --continue --cwd ...          # resumes the latest chat in that folder
 switchboard.exe --shell --cwd ...
+
+# macOS: the same flags on the app's binary
+/Applications/Switchboard.app/Contents/MacOS/switchboard --new-claude --cwd ~/code/project
 ```
 
 ## Straight answers
@@ -68,16 +83,23 @@ switchboard.exe --shell --cwd ...
   `~/.claude/sessions`; Switchboard matches those to its panes. That format isn't documented, so a Claude Code update
   could break the lamps until Switchboard catches up. The terminals keep working either way.
 - **What about my login?** The usage meter calls the same endpoint as `/usage`, with the sign-in Claude Code already
-  stores. The token is only ever sent to `api.anthropic.com`. Nothing else leaves your machine.
-- **macOS?** Coming next. Linux after that.
+  stores (on a Mac, Claude Code keeps it in your login Keychain, and Switchboard reads it from there). The token is only
+  ever sent to `api.anthropic.com`. Nothing else leaves your machine.
+- **macOS?** Yes, see Install above. Updates work the same way: the app offers them itself.
+- **Linux?** Not yet.
 
 ## Building from source
-Needs Node 20+, Rust (stable) and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for Windows.
+Needs Node 20+, Rust (stable) and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS
+(on a Mac: the Xcode command line tools).
 
 ```
 npm install
 npm run app:dev          # dev build, runs beside an installed copy with its own settings
-npm run tauri build      # installer in src-tauri/target/release/bundle/nsis
+npm run tauri build      # Windows: installer in src-tauri/target/release/bundle/nsis
+
+# macOS, universal binary: .app and .dmg in src-tauri/target/universal-apple-darwin/release/bundle
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run tauri build -- --target universal-apple-darwin
 ```
 
 Architecture notes are in [CLAUDE.md](CLAUDE.md), and traps already hit in [docs/gotchas.md](docs/gotchas.md).

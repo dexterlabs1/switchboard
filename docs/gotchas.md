@@ -67,3 +67,27 @@
 - **Symptom:** a chat opened while the layout was still changing (several panes added at once, a preset applied) draws overlapping lines and leftovers like "Enter to confirm".
 - **Cause:** xterm's `onResize` fires while `pty_spawn` is still in flight; `pty_resize` finds no pane yet and the error is swallowed, so the PTY keeps the size from spawn time and Claude Code draws for the wrong width.
 - **Fix:** after `pty_spawn`/`pty_attach` resolve, compare the terminal's cols/rows with the size sent and resize if they differ (`Pane.syncSize`).
+
+## GOTCHA (macOS): the dev config drops the traffic lights
+- **Symptom:** `tauri dev --config src-tauri/tauri.dev.conf.json` on a Mac opens a frameless window with no
+  traffic lights (and the custom buttons are hidden on Mac, so nothing closes it but ⌘Q).
+- **Cause:** configs merge as JSON merge patches and arrays are replaced whole: tauri.conf.json, then
+  tauri.macos.conf.json, then each `--config`. The dev config's `app.windows` replaces the Mac one.
+- **Fix:** `npm run app:dev` goes through `tools/app-dev.mjs`, which adds `tauri.dev.macos.conf.json` last on a
+  Mac. A window option that must differ per platform lives in every config that lists `app.windows`.
+
+## GOTCHA (macOS): Tauri's default menu takes ⌘W
+- The default macOS menu has Window → Close Window on ⌘W and Quit on ⌘Q, which closed the whole window
+  (or skipped the "chats still working?" check) instead of closing a pane. `lib.rs` builds its own menu:
+  no Close Window, and Quit is a custom item that calls `window.close()` so it goes through the same
+  close-requested handler as the close button. Keep the Edit menu: without it ⌘C/⌘V don't work in text fields.
+
+## GOTCHA (macOS): an exit watcher that reaps the child loses its exit code
+- `waitpid` in the watcher thread reaps the shell, so `finish()`'s `try_wait` then fails and every pane
+  reports `[exited 0]`. Wait with `waitid(P_PID, …, WEXITED | WNOWAIT)` (waits without reaping), and reap
+  with `waitpid(WNOHANG)` after `finish()`, for panes `pty_kill` already removed (else zombies until quit).
+  Don't poll `kill(pid, 0)`: a zombie still answers it.
+
+## GOTCHA: macOS targets can't be cargo-checked on Windows
+- `cargo check --target aarch64-apple-darwin` stops at `objc2-exception-helper`'s build script (it compiles
+  an Objective-C file and needs `cc`). Check Mac code on the CI macOS job (`build.yml`), not locally.

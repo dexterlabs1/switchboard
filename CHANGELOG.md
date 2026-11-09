@@ -4,6 +4,7 @@ Plain-language notes for people using Switchboard. `npm run release` turns "Unre
 app shows these in its update window. One line per change, written for the person using it.
 
 ## Unreleased
+- Switchboard now runs on macOS (Apple Silicon and Intel): download the .dmg from the release page. Shortcuts use ⌘ where Windows uses Ctrl, panes run your login shell, and the window has the usual Mac traffic lights.
 
 ## 0.2.0 — 2026-11-09
 - Fixed: a chat opened while the layout was changing could draw at the wrong width (overlapping, garbled lines).
