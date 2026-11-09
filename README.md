@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/wordmark.png" width="300" alt="switchboard"></p>
 
-<p align="center"><b>Every chat. One glance.</b><br>
+<p align="center"><b>Your chats, organized.</b><br>
 A tiling terminal for Windows that runs all your Claude Code chats side by side and lights up the one that's waiting on you.</p>
 
 <p align="center">
