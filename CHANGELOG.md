@@ -4,6 +4,8 @@ Plain-language notes for people using Switchboard. `npm run release` turns "Unre
 app shows these in its update window. One line per change, written for the person using it.
 
 ## Unreleased
+
+## 0.2.0 — 2026-11-09
 - Fixed: a chat opened while the layout was changing could draw at the wrong width (overlapping, garbled lines).
 - Switchboard is open source (MIT) and updates now come from GitHub Releases: the installer is downloaded and checked before it runs.
 - New chats start in a folder you choose ("Start new chats in this pane's folder" in the command palette); until then, where your chats already run, or your home folder.
