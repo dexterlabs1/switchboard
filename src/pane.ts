@@ -58,6 +58,8 @@ export interface PaneHooks {
 }
 
 export const DEFAULT_ZOOM = 15;
+/** GPU (WebGL) text rendering; `--renderer dom` turns it off for a launch. */
+export const renderOpts = { webgl: true };
 /** A chat idle this long gets a quiet "park?" hint in its header. */
 export const IDLE_PARK_MS = 2 * 60 * 60 * 1000;
 const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, monospace';
@@ -172,7 +174,7 @@ export class Pane {
     this.term.unicode.activeVersion = "11";
     this.term.loadAddon(new WebLinksAddon((_e, uri) => openUrl(uri)));
     this.term.open(this.host);
-    try {
+    if (renderOpts.webgl) try {
       const gl = new WebglAddon();
       gl.onContextLoss(() => {
         gl.dispose();

@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import * as L from "./layout";
-import { DEFAULT_ZOOM, IDLE_PARK_MS, SPIN_FRAMES, Pane, type LiveSession, type PaneKind, type PaneSpec, type Status } from "./pane";
+import { DEFAULT_ZOOM, IDLE_PARK_MS, renderOpts, SPIN_FRAMES, Pane, type LiveSession, type PaneKind, type PaneSpec, type Status } from "./pane";
 import { closeOverlay, confirmModal, hostPicker, mount, overlayOpen, releaseNotesModal, renameModal, sessionsDrawer, type Host, type ReleaseNote } from "./ui";
 import { h } from "./util";
 import wordmarkDark from "./assets/logo-wordmark.png";
@@ -1078,8 +1078,11 @@ invoke<string[]>("launch_args")
     if (!args.includes("--diag")) return;
     window.addEventListener("error", (e) => diagErrors.push(String(e.message)));
     window.addEventListener("unhandledrejection", (e) => diagErrors.push(String(e.reason)));
+    const gl = document.createElement("canvas").getContext("webgl2");
+    const dbg = gl?.getExtension("WEBGL_debug_renderer_info");
+    const glInfo = gl ? `webgl2 ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}` : "no webgl2";
     setInterval(() => {
-      const head = `${new Date().toISOString()} ${navigator.userAgent}\nwindow ${innerWidth}x${innerHeight} dpr ${devicePixelRatio} focused=${focused}`;
+      const head = `${new Date().toISOString()} ${navigator.userAgent}\nwindow ${innerWidth}x${innerHeight} dpr ${devicePixelRatio} focused=${focused} ${glInfo}`;
       const text = [head, ...[...panes.values()].map((p) => p.diag()), ...diagErrors.map((e) => `error: ${e}`)].join("\n");
       invoke("diag_write", { text }).catch(() => {});
     }, 2000);
@@ -1238,6 +1241,9 @@ listen<string[]>("cli", (e) => handleArgs(e.payload));
 
 // ---------- boot ----------
 async function boot() {
+  const args0 = await invoke<string[]>("launch_args").catch((): string[] => []);
+  const r = args0.indexOf("--renderer");
+  if (r >= 0 && args0[r + 1] === "dom") renderOpts.webgl = false;
   let saved: Saved | null = null;
   try {
     const raw = await invoke<string | null>("load_state");

@@ -31,8 +31,19 @@ keys() { front; osascript -e "tell application \"System Events\" to $1" >> "$LOG
 # Processes the panes started: claude, and the login shells (argv0 "-zsh"/"-bash" or "<shell> -l").
 panes() { pgrep -fl "claude|^-(ba|z)sh|sh -l" | grep -v pgrep | tee -a "$LOG" | wc -l | tr -d ' '; }
 
-say "launch with --shell"
-"$BIN" --shell --cwd "$DEMO" --diag > "$OUT/app-stdout.txt" 2>&1 &
+STATE_DIR="$HOME/Library/Application Support/switchboard"
+
+say "renderer comparison: default (WebGL) launch"
+"$BIN" --shell --cwd "$DEMO" --diag > "$OUT/app-stdout-webgl.txt" 2>&1 &
+PID=$!
+sleep 10
+keys 'keystroke "echo webgl renderer"'
+keys 'key code 36'
+shot 0-webgl-shell 2
+kill "$PID"; sleep 2; rm -rf "$STATE_DIR"
+
+say "launch with --shell (DOM renderer for the rest)"
+"$BIN" --shell --cwd "$DEMO" --diag --renderer dom > "$OUT/app-stdout.txt" 2>&1 &
 PID=$!
 sleep 10
 if ! kill -0 "$PID" 2>/dev/null; then say "APP EXITED EARLY"; cat "$OUT/app-stdout.txt"; exit 1; fi
