@@ -1070,6 +1070,22 @@ win
   })
   .catch(() => {});
 
+// `--diag` (CI live checks, tools/ci/mac_live.sh): every 2 s write each pane's size, renderer and screen
+// text to diag.txt next to state.json, plus any script errors. There is no DevTools protocol on macOS.
+const diagErrors: string[] = [];
+invoke<string[]>("launch_args")
+  .then((args) => {
+    if (!args.includes("--diag")) return;
+    window.addEventListener("error", (e) => diagErrors.push(String(e.message)));
+    window.addEventListener("unhandledrejection", (e) => diagErrors.push(String(e.reason)));
+    setInterval(() => {
+      const head = `${new Date().toISOString()} ${navigator.userAgent}\nwindow ${innerWidth}x${innerHeight} dpr ${devicePixelRatio} focused=${focused}`;
+      const text = [head, ...[...panes.values()].map((p) => p.diag()), ...diagErrors.map((e) => `error: ${e}`)].join("\n");
+      invoke("diag_write", { text }).catch(() => {});
+    }, 2000);
+  })
+  .catch(() => {});
+
 // Dev-only handle for driving the app over CDP in tests (tools/cdp.js eval 4831 ...).
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__sb = {

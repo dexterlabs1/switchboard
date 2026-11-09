@@ -130,6 +130,9 @@ export class Pane {
   private resizeTimer = 0;
 
   status: Status = "none";
+  renderer = "dom";
+  /** Bytes of output received from the process (for the `--diag` report). */
+  received = 0;
   attention = false;
   live: LiveSession | null = null;
   oscTitle = "";
@@ -171,10 +174,14 @@ export class Pane {
     this.term.open(this.host);
     try {
       const gl = new WebglAddon();
-      gl.onContextLoss(() => gl.dispose());
+      gl.onContextLoss(() => {
+        gl.dispose();
+        this.renderer = "dom (webgl context lost)";
+      });
       this.term.loadAddon(gl);
-    } catch {
-      /* DOM renderer fallback */
+      this.renderer = "webgl";
+    } catch (e) {
+      this.renderer = `dom (${e})`; // DOM renderer fallback
     }
 
     this.term.onData((d) => this.write(d));
@@ -445,6 +452,7 @@ export class Pane {
       const ch = new Channel<{ t: "data"; d: string } | { t: "exit"; code: number }>();
       ch.onmessage = (m) => {
         if (m.t === "data") {
+          this.received += m.d.length;
           this.term.write(m.d);
           if (!this.gotData) {
             this.gotData = true;
@@ -625,6 +633,21 @@ export class Pane {
     this.searchBox?.remove();
     this.searchBox = null;
     this.focus();
+  }
+
+  /** State for the `--diag` report (CI live checks): sizes, renderer, and the visible screen text. */
+  diag(): string {
+    const b = this.term.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < this.term.rows; i++) lines.push(b.getLine(b.viewportY + i)?.translateToString(true) ?? "");
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    const host = this.host.getBoundingClientRect();
+    const canvases = [...this.host.querySelectorAll("canvas")].map((c) => `${c.width}x${c.height}`).join(",");
+    return [
+      `pane ${this.spec.id} ${this.spec.kind} alive=${this.alive} status=${this.status} renderer=${this.renderer} received=${this.received}`,
+      `  host ${Math.round(host.width)}x${Math.round(host.height)} term ${this.term.cols}x${this.term.rows} font ${this.term.options.fontSize}px canvases [${canvases}] rows-dom=${this.host.querySelectorAll(".xterm-rows > div").length}`,
+      ...lines.map((l) => `  | ${l}`),
+    ].join("\n");
   }
 
   /** Remote/shell panes have no registry entry; infer Claude's state from its terminal title. */

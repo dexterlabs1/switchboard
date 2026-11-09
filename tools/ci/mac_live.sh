@@ -11,6 +11,8 @@ ID="com.dexterlabs.switchboard"
 DEMO="$HOME/switchboard-demo"
 mkdir -p "$DEMO" && printf '# demo project\n' > "$DEMO/README.md"
 LOG="$OUT/steps.txt"
+# Written by the app every 2 s because of --diag: pane sizes, renderer, bytes received, screen text.
+DIAG="$HOME/Library/Application Support/switchboard/diag.txt"
 : > "$LOG"
 
 sw_vers > "$OUT/system.txt"
@@ -18,14 +20,19 @@ system_profiler SPDisplaysDataType 2>/dev/null | grep -i -E "resolution|display 
 echo "claude: $(command -v claude || echo missing) $(claude --version 2>/dev/null)" >> "$OUT/system.txt"
 
 say() { echo "== $*" | tee -a "$LOG"; }
-shot() { sleep "${2:-1}"; screencapture -x "$OUT/$1.png" && say "shot $1" || say "screencapture $1 FAILED"; }
+shot() {
+  sleep "${2:-1}"
+  screencapture -x "$OUT/$1.png" && say "shot $1" || say "screencapture $1 FAILED"
+  sleep 2.2; cp "$DIAG" "$OUT/$1.diag.txt" 2>/dev/null || say "no diag.txt yet"
+}
 front() { osascript -e "tell application id \"$ID\" to activate" >> "$LOG" 2>&1; sleep 0.5; }
 # System Events keystrokes need Accessibility for the runner; log (don't fail) if it's not granted.
 keys() { front; osascript -e "tell application \"System Events\" to $1" >> "$LOG" 2>&1 && say "keys: $1" || say "keys FAILED: $1"; }
-panes() { pgrep -fl "claude|zsh -l|-zsh" | grep -v pgrep | tee -a "$LOG" | wc -l | tr -d ' '; }
+# Processes the panes started: claude, and the login shells (argv0 "-zsh"/"-bash" or "<shell> -l").
+panes() { pgrep -fl "claude|^-(ba|z)sh|sh -l" | grep -v pgrep | tee -a "$LOG" | wc -l | tr -d ' '; }
 
 say "launch with --shell"
-"$BIN" --shell --cwd "$DEMO" > "$OUT/app-stdout.txt" 2>&1 &
+"$BIN" --shell --cwd "$DEMO" --diag > "$OUT/app-stdout.txt" 2>&1 &
 PID=$!
 sleep 10
 if ! kill -0 "$PID" 2>/dev/null; then say "APP EXITED EARLY"; cat "$OUT/app-stdout.txt"; exit 1; fi

@@ -136,6 +136,17 @@ fn mac_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The frontend's `--diag` report (CI live checks). Only written when this launch has `--diag`.
+#[tauri::command]
+fn diag_write(text: String) -> Result<(), String> {
+    if !std::env::args().any(|a| a == "--diag") {
+        return Err("not a --diag launch".into());
+    }
+    let p = state_path().with_file_name("diag.txt");
+    std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(p, text).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn home_dir() -> String {
     dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
@@ -193,6 +204,7 @@ pub fn run() {
             home_dir,
             open_url,
             launch_args,
+            diag_write,
         ])
         .build(tauri::generate_context!())
         .expect("error while building switchboard");
