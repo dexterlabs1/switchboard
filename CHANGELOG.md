@@ -4,6 +4,7 @@ Plain-language notes for people using Switchboard. `npm run release` turns "Unre
 app shows these in its update window. One line per change, written for the person using it.
 
 ## Unreleased
+- Remote hosts can no longer start with "-", so a host name can never be read as an ssh option.
 - Switchboard now runs on macOS (Apple Silicon and Intel): download the .dmg from the release page. Shortcuts use ⌘ where Windows uses Ctrl, panes run your login shell, and the window has the usual Mac traffic lights.
 
 ## 0.2.0 — 2026-11-09

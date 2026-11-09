@@ -19,7 +19,8 @@ pub struct Host {
 }
 
 pub fn valid_target(t: &str) -> bool {
-    !t.is_empty() && t.len() < 200 && t.chars().all(|c| c.is_ascii_alphanumeric() || "@._:-".contains(c))
+    // A leading '-' would reach ssh as an option (e.g. -oProxyCommand=...), so it is never a host.
+    !t.is_empty() && t.len() < 200 && !t.starts_with('-') && t.chars().all(|c| c.is_ascii_alphanumeric() || "@._:-".contains(c))
 }
 
 fn ssh_config_hosts() -> Vec<Host> {
