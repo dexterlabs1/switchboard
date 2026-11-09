@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import * as L from "./layout";
-import { DEFAULT_ZOOM, IDLE_PARK_MS, renderOpts, SPIN_FRAMES, Pane, type LiveSession, type PaneKind, type PaneSpec, type Status } from "./pane";
+import { DEFAULT_ZOOM, IDLE_PARK_MS, paneOptions, renderOpts, SPIN_FRAMES, Pane, type LiveSession, type PaneKind, type PaneSpec, type Status } from "./pane";
 import { closeOverlay, confirmModal, hostPicker, mount, overlayOpen, releaseNotesModal, renameModal, sessionsDrawer, type Host, type ReleaseNote } from "./ui";
 import { h } from "./util";
 import wordmarkDark from "./assets/logo-wordmark.png";
@@ -32,6 +32,7 @@ interface Saved {
   theme?: string;
   shelf?: Parked[];
   homeCwd?: string;
+  copyOnSelect?: boolean;
 }
 
 const win = getCurrentWindow();
@@ -127,6 +128,7 @@ function snapshot(): Saved {
     keys: keyCfg,
     theme: theme().id,
     homeCwd,
+    copyOnSelect: paneOptions.copyOnSelect,
     shelf: shelfItems.map((it) => ({ ...it, spec: it.mode === "running" ? panes.get(it.id)?.spec ?? it.spec : it.spec })),
   };
 }
@@ -779,6 +781,11 @@ const ACTIONS_RUN: Record<string, (fp: Pane | undefined) => void> = {
   "open.keys": () => openKeys(),
   "open.theme": () => openThemes(),
   "usage.refresh": () => status.onRefresh(),
+  "app.copyOnSelect": () => {
+    paneOptions.copyOnSelect = !paneOptions.copyOnSelect;
+    save();
+    status.flash(`copy on select ${paneOptions.copyOnSelect ? "on" : "off"}`);
+  },
   "app.homeHere": (fp) => {
     if (!fp || fp.spec.kind === "ssh") return status.flash("focus a local chat or shell first");
     homeCwd = fp.spec.cwd;
@@ -1256,6 +1263,7 @@ async function boot() {
   const used = new Map<string, number>();
   for (const sp of saved?.panes ?? []) if (sp.kind !== "ssh" && sp.cwd) used.set(sp.cwd, (used.get(sp.cwd) ?? 0) + 1);
   homeCwd = saved?.homeCwd || [...used].sort((a, b) => b[1] - a[1])[0]?.[0] || homeDir;
+  paneOptions.copyOnSelect = saved?.copyOnSelect ?? true;
   if (saved?.v === 1) {
     remote.hosts = saved.hosts ?? [];
     remote.claudeCmd = saved.claudeCmd ?? {};

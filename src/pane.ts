@@ -58,6 +58,8 @@ export interface PaneHooks {
 }
 
 export const DEFAULT_ZOOM = 15;
+/** App-wide pane options (set from saved state in main.ts). */
+export const paneOptions = { copyOnSelect: true };
 /** GPU (WebGL) text rendering. Off on macOS: in WKWebView on the CI Mac the WebGL canvas stayed blank
  *  while the buffer held the text (docs/gotchas.md). `--renderer dom|webgl` overrides it for a launch. */
 export const renderOpts = { webgl: !isMac };
@@ -217,6 +219,14 @@ export class Pane {
       { capture: true, passive: false },
     );
     // Right click: copy if there's a selection, else paste (Windows Terminal behaviour).
+    // Copy on select: when a mouse selection ends, copy it and leave it highlighted.
+    this.host.addEventListener("mouseup", (e) => {
+      if (e.button !== 0 || !paneOptions.copyOnSelect) return;
+      setTimeout(() => {
+        const s = this.term.hasSelection() ? this.term.getSelection() : "";
+        if (s.trim()) invoke("clipboard_set", { text: s }).catch(() => {});
+      }, 0);
+    });
     this.body.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       if (this.term.hasSelection()) this.copySelection();

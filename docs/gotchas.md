@@ -98,3 +98,8 @@
 ## GOTCHA: macOS targets can't be cargo-checked on Windows
 - `cargo check --target aarch64-apple-darwin` stops at `objc2-exception-helper`'s build script (it compiles
   an Objective-C file and needs `cc`). Check Mac code on the CI macOS job (`build.yml`), not locally.
+
+## GOTCHA: clicks never reach Claude Code on Windows (system ConPTY drops mouse mode)
+- **Symptom:** clicking items in Claude Code (e.g. the background-agent list) does nothing in Switchboard, but works in Windows Terminal.
+- **Cause:** the ConPTY built into Windows swallows DECSET 1000/1006, so xterm.js never enters mouse-tracking mode (`term.modes.mouseTrackingMode` stays `none`) and never reports clicks.
+- **Fix:** ship Microsoft's newer ConPTY (`conpty.dll` + `OpenConsole.exe` from the `Microsoft.Windows.Console.ConPTY` NuGet, the one Windows Terminal uses) next to the exe; portable-pty prefers a sideloaded `conpty.dll`. `tools/fetch-conpty.mjs` (pinned version + sha256) runs in `app:dev`, `npm run release` and CI; `tauri.windows.conf.json` bundles both files.

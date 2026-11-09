@@ -38,6 +38,7 @@ const BASE_ACTIONS: ActionDef[] = [
   { id: "open.theme", label: "Themes", group: "Open", keys: [] },
   { id: "usage.refresh", label: "Refresh plan usage", group: "Open", keys: [] },
   { id: "app.homeHere", label: "Start new chats in this pane's folder", group: "Open", keys: [] },
+  { id: "app.copyOnSelect", label: "Copy on select: on/off", group: "Open", keys: [] },
   { id: "window.fullscreen", label: "Full screen", group: "Open", keys: ["F11"] },
   { id: "app.update", label: "Install update (restart into the newest build)", group: "Open", keys: [] },
   { id: "app.checkUpdate", label: "Check for updates", group: "Open", keys: [] },

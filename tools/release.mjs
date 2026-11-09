@@ -71,6 +71,7 @@ for (const raw of cl.split(/\r?\n/)) {
 }
 const notes = changelog.filter(Boolean);
 
+sh("node tools/fetch-conpty.mjs");
 sh("npm run tauri build");
 
 const dir = join(root, "src-tauri", "target", "release", "bundle", "nsis");

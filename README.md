@@ -106,4 +106,4 @@ Architecture notes are in [CLAUDE.md](CLAUDE.md), and traps already hit in [docs
 Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
-[MIT](LICENSE) © 2026 Dexter Brewer
+[MIT](LICENSE) © 2026 Dexter Brewer. The Windows build bundles Microsoft's ConPTY (`conpty.dll`, `OpenConsole.exe`; MIT), fetched at build time by `tools/fetch-conpty.mjs`.

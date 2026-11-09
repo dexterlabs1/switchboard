@@ -4,6 +4,8 @@ Plain-language notes for people using Switchboard. `npm run release` turns "Unre
 app shows these in its update window. One line per change, written for the person using it.
 
 ## Unreleased
+- Windows: Switchboard now ships Microsoft's newer console host (the one Windows Terminal uses), so clicks reach Claude Code: you can click items like the background-agent list.
+- Copy on select: highlighting text in a pane copies it straight away (turn it off with "Copy on select" in the command palette).
 
 ## 0.3.0 — 2026-11-09
 - Remote hosts can no longer start with "-", so a host name can never be read as an ssh option.

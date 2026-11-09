@@ -9,5 +9,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const configs = ["src-tauri/tauri.dev.conf.json"];
 if (process.platform === "darwin") configs.push("src-tauri/tauri.dev.macos.conf.json");
 const args = ["tauri", "dev", ...configs.flatMap((c) => ["--config", c]), ...process.argv.slice(2)];
+if (process.platform === "win32") spawnSync(process.execPath, [join(root, "tools", "fetch-conpty.mjs"), "--dev"], { cwd: root, stdio: "inherit" });
 const r = spawnSync("npx", args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
 process.exit(r.status ?? 1);
